@@ -10,11 +10,22 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 )
 
 var ErrBadMakeflags = errors.New("Invalid format in MAKEFLAGS")
 var ErrNotRecursiveMake = errors.New("Make rule not marked as recursive")
+
+type Js struct {
+	r *os.File
+	w *os.File
+	m sync.Mutex
+}
+
+type Token struct {
+	t byte
+}
 
 func pipeFdToFile(fd int, name string) *os.File {
 	var stats syscall.Stat_t
@@ -26,7 +37,7 @@ func pipeFdToFile(fd int, name string) *os.File {
 	return nil
 }
 
-func parseMakeflags() (err error) {
+func parseMakeflags() (js *Js, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 
 	for _, mflag := range mflags {
@@ -35,27 +46,59 @@ func parseMakeflags() (err error) {
 			s := strings.Split(strings.TrimPrefix(
 				mflag, "--jobserver-auth="), ",")
 			if len(s) != 2 {
-				return ErrBadMakeflags
+				return nil, ErrBadMakeflags
 			}
 			r, err := strconv.Atoi(s[0])
 			if err != nil {
-				return ErrBadMakeflags
+				return nil, ErrBadMakeflags
 			}
 			w, err := strconv.Atoi(s[1])
 			if err != nil {
-				return ErrBadMakeflags
+				return nil, ErrBadMakeflags
 			}
 			fmt.Printf("R = %d W = %d\n", r, w)
 			rFile := pipeFdToFile(r, "Jobserver-R")
 			if rFile == nil {
-				return ErrNotRecursiveMake
+				return nil, ErrNotRecursiveMake
 			}
-			wFile := pipeFdToFile(r, "Jobserver-W")
+			wFile := pipeFdToFile(w, "Jobserver-W")
 			if wFile == nil {
-				return ErrNotRecursiveMake
+				return nil, ErrNotRecursiveMake
 			}
-			return nil
+			return &Js{r: rFile, w: wFile}, nil
 		}
 	}
-	return nil
+	return &Js{}, nil
+}
+
+func (j *Js) GetToken() (t Token) {
+	j.m.Lock()
+	defer j.m.Unlock()
+	if j.r == nil {
+		return Token{}
+	}
+	p := make([]byte, 1)
+	n, err := j.r.Read(p)
+	if err != nil {
+		panic(err)
+	}
+	if n != 1 {
+		panic("Unexpected byte count")
+	}
+	return Token{t: p[0]}
+}
+
+func (j *Js) PutToken(t Token) {
+	if j.r == nil {
+		return
+	}
+	j.m.Lock()
+	defer j.m.Unlock()
+	n, err := j.w.Write([]byte{t.t})
+	if err != nil {
+		panic(err)
+	}
+	if n != 1 {
+		panic("Unexpected byte count")
+	}
 }
