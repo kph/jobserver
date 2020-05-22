@@ -15,10 +15,12 @@ import (
 func TestJobserver(t *testing.T) {
 	if _, x := os.LookupEnv("MAKEFLAGS"); !x {
 		t.Error("not run under make - type make to test")
+		return
 	}
 	cl, err := parseMakeflags()
 	if err != nil {
 		t.Error("parseMakeflags:", err)
+		return
 	}
 
 	tks := []Token{}
@@ -45,6 +47,7 @@ func TestJobserver(t *testing.T) {
 	if len(tks) != expected {
 		t.Error("Jobs", cl.jobs, "Expected", expected, "Tokens",
 			len(tks))
+		return
 	}
 	m.Lock() // Block goroutines from our free
 	for _, tk := range tks {
