@@ -26,8 +26,10 @@ type Client struct {
 }
 
 type Server struct {
-	r *os.File
-	w *os.File
+	r           *os.File
+	w           *os.File
+	currentJobs int
+	maxJobs     int
 }
 
 type Token struct {
@@ -44,7 +46,7 @@ func pipeFdToFile(fd int, name string) *os.File {
 	return nil
 }
 
-func parseMakeflags() (cl *Client, err error) {
+func ParseMakeflags() (cl *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 	cl = &Client{}
 	for _, mflag := range mflags {
@@ -120,7 +122,7 @@ func (cl *Client) PutToken(t Token) {
 	}
 }
 
-func SetupServer(cmd *exec.Cmd) (srv *Server, err error) {
+func SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
 	fd := 3 + len(cmd.ExtraFiles)
 	r1, w1, err := os.Pipe()
 	if err != nil {
@@ -153,7 +155,7 @@ func SetupServer(cmd *exec.Cmd) (srv *Server, err error) {
 				mflags = append(mflags, js)
 				found = true
 			}
-			env[i] = strings.Join(mflags, " ")
+			env[i] = "MAKEFLAGS=" + strings.Join(mflags, " ")
 			break
 		}
 	}
@@ -164,7 +166,29 @@ func SetupServer(cmd *exec.Cmd) (srv *Server, err error) {
 	cmd.ExtraFiles = append(cmd.ExtraFiles, r1)
 	cmd.ExtraFiles = append(cmd.ExtraFiles, w2)
 
-	srv = &Server{r: r2, w: w1}
+	srv = &Server{r: r2, w: w1, maxJobs: jobs}
+
+	go func() {
+		p := make([]byte, 1)
+		n, err := r1.Read(p)
+		if err != nil {
+			panic(err)
+		}
+		if n != 1 {
+			panic("Unexpected byte count")
+		}
+
+	}()
 
 	return
+}
+
+func (srv *Server) EnableJob() {
+	n, err := srv.w.Write([]byte{'+'})
+	if err != nil {
+		panic(err)
+	}
+	if n != 1 {
+		panic("Unexpected byte count")
+	}
 }
