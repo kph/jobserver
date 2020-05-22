@@ -18,6 +18,7 @@ type Client struct {
 	w    *os.File
 	m    sync.Mutex
 	jobs int
+	tks  chan Token
 }
 
 type Token struct {
@@ -77,35 +78,69 @@ func ParseMakeflags() (cl *Client, err error) {
 			}
 		}
 	}
+	if cl.r != nil {
+		cl.tks = make(chan Token, 100)
+		go func() {
+			p := make([]byte, 1)
+			for {
+				n, err := cl.r.Read(p)
+				if err != nil {
+					//panic(err)
+					return
+				}
+				if n != 1 {
+					panic("Unexpected byte count")
+				}
+				cl.tks <- Token{t: p[0]}
+				fmt.Println("Got token", len(cl.tks))
+			}
+		}()
+	}
 	return
 }
 
 func (cl *Client) GetToken() (t Token) {
-	if cl.r == nil {
-		cl.m.Lock()
-		return Token{}
-	}
-	p := make([]byte, 1)
-	n, err := cl.r.Read(p)
-	if err != nil {
-		panic(err)
-	}
-	if n != 1 {
-		panic("Unexpected byte count")
-	}
-	return Token{t: p[0]}
+	//	if cl.r == nil {
+	//	cl.m.Lock()
+	//return Token{}
+	//}
+	fmt.Println("In GetToken", len(cl.tks))
+	t = <-cl.tks
+	fmt.Println("Done GetToken", len(cl.tks))
+	return t
 }
 
 func (cl *Client) PutToken(t Token) {
 	if cl.r == nil {
-		cl.m.Unlock()
 		return
 	}
-	n, err := cl.w.Write([]byte{t.t})
-	if err != nil {
-		panic(err)
+	fmt.Println("PutToken")
+	cl.tks <- t
+	fmt.Println("Done pUtToken len", len(cl.tks))
+}
+
+func (cl *Client) FlushTokens() {
+	fmt.Println("FlushTokens")
+	if cl.r == nil {
+		return
 	}
-	if n != 1 {
-		panic("Unexpected byte count")
+	cl.r.Close()
+
+	for {
+		select {
+		case tk := <-cl.tks:
+			fmt.Println("flushing...")
+			n, err := cl.w.Write([]byte{tk.t})
+			if err != nil {
+				panic(err)
+			}
+			if n != 1 {
+				panic("Unexpected byte count")
+			}
+			fmt.Println("Flushed...")
+		default:
+			fmt.Println("Done default")
+			return
+		}
 	}
 }

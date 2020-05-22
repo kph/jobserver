@@ -25,20 +25,21 @@ func TestJobserver(t *testing.T) {
 
 	tks := []Token{}
 	var m sync.Mutex
-	quitting := false
+	done := make(chan bool)
 	for i := 0; i < 2*(cl.jobs+1); i++ {
 		go func() {
-			tk := cl.GetToken()
-			m.Lock()
-			if !quitting {
+			select {
+			case tk := <-cl.tks:
+				m.Lock()
 				tks = append(tks, tk)
-			} else {
-				cl.PutToken(tk)
+				m.Unlock()
+			case <-done:
+				return
 			}
-			m.Unlock()
 		}()
 	}
 	time.Sleep(1 * time.Second)
+	close(done)
 	fmt.Printf("Jobs %d Tokens %d\n", cl.jobs, len(tks))
 	expected := cl.jobs - 1
 	if cl.jobs <= 2 {
@@ -50,10 +51,20 @@ func TestJobserver(t *testing.T) {
 		return
 	}
 	m.Lock() // Block goroutines from our free
-	for _, tk := range tks {
+	for len(tks) != 0 {
+		tk := tks[0]
+		tks = tks[1:]
 		cl.PutToken(tk)
 	}
-	quitting = true
 	m.Unlock()
+	time.Sleep(1 * time.Second)
+	m.Lock() //
+	for len(tks) != 0 {
+		tk := tks[0]
+		tks = tks[1:]
+		cl.PutToken(tk)
+	}
+	m.Unlock()
+	cl.FlushTokens()
 	time.Sleep(1 * time.Second)
 }
