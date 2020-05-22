@@ -17,7 +17,7 @@ import (
 var ErrBadMakeflags = errors.New("Invalid format in MAKEFLAGS")
 var ErrNotRecursiveMake = errors.New("Make rule not marked as recursive")
 
-type Js struct {
+type Client struct {
 	r *os.File
 	w *os.File
 	m sync.Mutex
@@ -37,7 +37,7 @@ func pipeFdToFile(fd int, name string) *os.File {
 	return nil
 }
 
-func parseMakeflags() (js *Js, err error) {
+func parseMakeflags() (js *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 
 	for _, mflag := range mflags {
@@ -65,16 +65,15 @@ func parseMakeflags() (js *Js, err error) {
 			if wFile == nil {
 				return nil, ErrNotRecursiveMake
 			}
-			return &Js{r: rFile, w: wFile}, nil
+			return &Client{r: rFile, w: wFile}, nil
 		}
 	}
-	return &Js{}, nil
+	return &Client{}, nil
 }
 
-func (j *Js) GetToken() (t Token) {
-	j.m.Lock()
-	defer j.m.Unlock()
+func (j *Client) GetToken() (t Token) {
 	if j.r == nil {
+		j.m.Lock()
 		return Token{}
 	}
 	p := make([]byte, 1)
@@ -88,12 +87,11 @@ func (j *Js) GetToken() (t Token) {
 	return Token{t: p[0]}
 }
 
-func (j *Js) PutToken(t Token) {
+func (j *Client) PutToken(t Token) {
 	if j.r == nil {
+		j.m.Unlock()
 		return
 	}
-	j.m.Lock()
-	defer j.m.Unlock()
 	n, err := j.w.Write([]byte{t.t})
 	if err != nil {
 		panic(err)
@@ -101,4 +99,5 @@ func (j *Js) PutToken(t Token) {
 	if n != 1 {
 		panic("Unexpected byte count")
 	}
+	j.w.Sync()
 }

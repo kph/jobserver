@@ -5,8 +5,11 @@
 package jobserver
 
 import (
+	"fmt"
 	"os"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestJobserver(t *testing.T) {
@@ -17,6 +20,33 @@ func TestJobserver(t *testing.T) {
 	if err != nil {
 		t.Error("parseMakeflags:", err)
 	}
-	tk := js.GetToken()
-	js.PutToken(tk)
+
+	tks := []Token{}
+	var m sync.Mutex
+	quitting := false
+	for i := 0; i < 20; i++ {
+		go func() {
+			tk := js.GetToken()
+			m.Lock()
+			if !quitting {
+				tks = append(tks, tk)
+				fmt.Printf("Got token %x\n", tk.t)
+			} else {
+				fmt.Printf("Returning token %x\n", tk.t)
+				js.PutToken(tk)
+			}
+			m.Unlock()
+		}()
+	}
+	time.Sleep(1 * time.Second)
+	fmt.Printf("Tokens %d\n", len(tks))
+	m.Lock() // Block goroutines from our free
+	for i, tk := range tks {
+		fmt.Printf("Putting token %x\n", tk.t)
+		js.PutToken(tk)
+		fmt.Printf("Put token %d\n", i)
+	}
+	quitting = true
+	m.Unlock()
+	time.Sleep(1 * time.Second)
 }
