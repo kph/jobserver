@@ -28,6 +28,7 @@ type Client struct {
 type Server struct {
 	r           *os.File
 	w           *os.File
+	m           sync.Mutex
 	currentJobs int
 	maxJobs     int
 }
@@ -168,6 +169,8 @@ func SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
 
 	srv = &Server{r: r2, w: w1, maxJobs: jobs}
 
+	srv.EnableJobs()
+
 	go func() {
 		p := make([]byte, 1)
 		n, err := r1.Read(p)
@@ -177,18 +180,26 @@ func SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
 		if n != 1 {
 			panic("Unexpected byte count")
 		}
+		srv.m.Lock()
+		srv.currentJobs--
+		srv.m.Unlock()
 
 	}()
 
 	return
 }
 
-func (srv *Server) EnableJob() {
-	n, err := srv.w.Write([]byte{'+'})
-	if err != nil {
-		panic(err)
-	}
-	if n != 1 {
-		panic("Unexpected byte count")
+func (srv *Server) EnableJobs() {
+	for srv.currentJobs < srv.maxJobs {
+		n, err := srv.w.Write([]byte{'+'})
+		if err != nil {
+			panic(err)
+		}
+		if n != 1 {
+			panic("Unexpected byte count")
+		}
+		srv.m.Lock()
+		srv.currentJobs++
+		srv.m.Unlock()
 	}
 }
