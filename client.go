@@ -119,7 +119,6 @@ func (cl *Client) PutToken(t Token) {
 }
 
 func (cl *Client) FlushTokens() {
-	fmt.Println("FlushTokens")
 	if cl.r == nil {
 		return
 	}
@@ -128,7 +127,6 @@ func (cl *Client) FlushTokens() {
 	for {
 		select {
 		case tk := <-cl.tks:
-			fmt.Println("flushing...")
 			n, err := cl.w.Write([]byte{tk.t})
 			if err != nil {
 				panic(err)
@@ -136,9 +134,7 @@ func (cl *Client) FlushTokens() {
 			if n != 1 {
 				panic("Unexpected byte count")
 			}
-			fmt.Println("Flushed...")
 		default:
-			fmt.Println("Done default")
 			return
 		}
 	}
