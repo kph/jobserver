@@ -16,7 +16,7 @@ func TestJobserver(t *testing.T) {
 	if _, x := os.LookupEnv("MAKEFLAGS"); !x {
 		t.Error("not run under make - type make to test")
 	}
-	js, err := parseMakeflags()
+	cl, err := parseMakeflags()
 	if err != nil {
 		t.Error("parseMakeflags:", err)
 	}
@@ -24,27 +24,31 @@ func TestJobserver(t *testing.T) {
 	tks := []Token{}
 	var m sync.Mutex
 	quitting := false
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 2*(cl.jobs+1); i++ {
 		go func() {
-			tk := js.GetToken()
+			tk := cl.GetToken()
 			m.Lock()
 			if !quitting {
 				tks = append(tks, tk)
-				fmt.Printf("Got token %x\n", tk.t)
 			} else {
-				fmt.Printf("Returning token %x\n", tk.t)
-				js.PutToken(tk)
+				cl.PutToken(tk)
 			}
 			m.Unlock()
 		}()
 	}
 	time.Sleep(1 * time.Second)
-	fmt.Printf("Tokens %d\n", len(tks))
+	fmt.Printf("Jobs %d Tokens %d\n", cl.jobs, len(tks))
+	expected := cl.jobs - 1
+	if cl.jobs <= 2 {
+		expected = 1
+	}
+	if len(tks) != expected {
+		t.Error("Jobs", cl.jobs, "Expected", expected, "Tokens",
+			len(tks))
+	}
 	m.Lock() // Block goroutines from our free
-	for i, tk := range tks {
-		fmt.Printf("Putting token %x\n", tk.t)
-		js.PutToken(tk)
-		fmt.Printf("Put token %d\n", i)
+	for _, tk := range tks {
+		cl.PutToken(tk)
 	}
 	quitting = true
 	m.Unlock()

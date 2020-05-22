@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,9 +19,15 @@ var ErrBadMakeflags = errors.New("Invalid format in MAKEFLAGS")
 var ErrNotRecursiveMake = errors.New("Make rule not marked as recursive")
 
 type Client struct {
+	r    *os.File
+	w    *os.File
+	m    sync.Mutex
+	jobs int
+}
+
+type Server struct {
 	r *os.File
 	w *os.File
-	m sync.Mutex
 }
 
 type Token struct {
@@ -37,14 +44,17 @@ func pipeFdToFile(fd int, name string) *os.File {
 	return nil
 }
 
-func parseMakeflags() (js *Client, err error) {
+func parseMakeflags() (cl *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
-
+	cl = &Client{}
 	for _, mflag := range mflags {
 		fmt.Println(mflag)
 		if strings.HasPrefix(mflag, "--jobserver-auth=") {
 			s := strings.Split(strings.TrimPrefix(
 				mflag, "--jobserver-auth="), ",")
+			if cl.r != nil {
+				return nil, ErrBadMakeflags
+			}
 			if len(s) != 2 {
 				return nil, ErrBadMakeflags
 			}
@@ -57,27 +67,36 @@ func parseMakeflags() (js *Client, err error) {
 				return nil, ErrBadMakeflags
 			}
 			fmt.Printf("R = %d W = %d\n", r, w)
-			rFile := pipeFdToFile(r, "Jobserver-R")
-			if rFile == nil {
+			cl.r = pipeFdToFile(r, "Jobserver-R")
+			if cl.r == nil {
 				return nil, ErrNotRecursiveMake
 			}
-			wFile := pipeFdToFile(w, "Jobserver-W")
-			if wFile == nil {
+			cl.w = pipeFdToFile(w, "Jobserver-W")
+			if cl.w == nil {
 				return nil, ErrNotRecursiveMake
 			}
-			return &Client{r: rFile, w: wFile}, nil
+			continue
+		}
+		if strings.HasPrefix(mflag, "-j") {
+			s := strings.TrimPrefix(mflag, "-j")
+			if s != "" {
+				cl.jobs, err = strconv.Atoi(s)
+				if err != nil {
+					return nil, ErrBadMakeflags
+				}
+			}
 		}
 	}
-	return &Client{}, nil
+	return
 }
 
-func (j *Client) GetToken() (t Token) {
-	if j.r == nil {
-		j.m.Lock()
+func (cl *Client) GetToken() (t Token) {
+	if cl.r == nil {
+		cl.m.Lock()
 		return Token{}
 	}
 	p := make([]byte, 1)
-	n, err := j.r.Read(p)
+	n, err := cl.r.Read(p)
 	if err != nil {
 		panic(err)
 	}
@@ -87,17 +106,65 @@ func (j *Client) GetToken() (t Token) {
 	return Token{t: p[0]}
 }
 
-func (j *Client) PutToken(t Token) {
-	if j.r == nil {
-		j.m.Unlock()
+func (cl *Client) PutToken(t Token) {
+	if cl.r == nil {
+		cl.m.Unlock()
 		return
 	}
-	n, err := j.w.Write([]byte{t.t})
+	n, err := cl.w.Write([]byte{t.t})
 	if err != nil {
 		panic(err)
 	}
 	if n != 1 {
 		panic("Unexpected byte count")
 	}
-	j.w.Sync()
+}
+
+func SetupServer(cmd *exec.Cmd) (srv *Server, err error) {
+	fd := 3 + len(cmd.ExtraFiles)
+	r1, w1, err := os.Pipe()
+	if err != nil {
+		return
+	}
+	r2, w2, err := os.Pipe()
+	if err != nil {
+		r1.Close()
+		w1.Close()
+		return
+	}
+	env := cmd.Env
+	if len(env) == 0 {
+		env = os.Environ()
+	}
+	js := "--jobserver-auth=" + strconv.Itoa(fd) + "," + strconv.Itoa(fd+1)
+	found := false
+	for i, envvar := range env {
+		if strings.HasPrefix(envvar, "MAKEFLAGS=") {
+			mflags := strings.Fields(strings.TrimPrefix(envvar,
+				"MAKEFLAGS="))
+			for j, mflag := range mflags {
+				if strings.HasPrefix(mflag, "--jobserver-auth=") {
+					mflags[j] = js
+					found = true
+					break
+				}
+			}
+			if !found {
+				mflags = append(mflags, js)
+				found = true
+			}
+			env[i] = strings.Join(mflags, " ")
+			break
+		}
+	}
+	if !found {
+		env = append(env, "MAKEFLAGS="+js)
+	}
+	cmd.Env = env
+	cmd.ExtraFiles = append(cmd.ExtraFiles, r1)
+	cmd.ExtraFiles = append(cmd.ExtraFiles, w2)
+
+	srv = &Server{r: r2, w: w1}
+
+	return
 }
