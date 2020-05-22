@@ -16,11 +16,13 @@ type Server struct {
 	r           *os.File
 	w           *os.File
 	m           sync.Mutex
+	cl          *Client
+	tks         []Token
 	currentJobs int
 	maxJobs     int
 }
 
-func SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
+func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 	fd := 3 + len(cmd.ExtraFiles)
 	r1, w1, err := os.Pipe()
 	if err != nil {
@@ -64,7 +66,7 @@ func SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
 	cmd.ExtraFiles = append(cmd.ExtraFiles, r1)
 	cmd.ExtraFiles = append(cmd.ExtraFiles, w2)
 
-	srv = &Server{r: r2, w: w1, maxJobs: jobs}
+	srv = &Server{r: r2, w: w1, maxJobs: jobs, cl: cl}
 
 	go func() {
 		go srv.EnableJobs()
@@ -78,6 +80,10 @@ func SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
 		}
 		srv.m.Lock()
 		srv.currentJobs--
+		if srv.cl != nil {
+			srv.cl.PutToken(srv.tks[len(srv.tks)-1])
+			srv.tks = srv.tks[:len(srv.tks)-1]
+		}
 		srv.m.Unlock()
 	}()
 
@@ -88,6 +94,9 @@ func (srv *Server) EnableJobs() {
 	srv.m.Lock()
 	defer srv.m.Unlock()
 	for srv.currentJobs < srv.maxJobs {
+		if srv.cl != nil {
+			srv.tks = append(srv.tks, srv.cl.GetToken())
+		}
 		n, err := srv.w.Write([]byte{'+'})
 		if err != nil {
 			panic(err)

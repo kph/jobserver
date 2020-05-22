@@ -46,7 +46,7 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		_, err := jobserver.SetupServer(cmd, 10)
+		_, err := jobserver.SetupServer(cmd, cl, 10)
 		if err != nil {
 			panic(err)
 		}
