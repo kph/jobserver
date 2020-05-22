@@ -92,7 +92,6 @@ func ParseMakeflags() (cl *Client, err error) {
 					panic("Unexpected byte count")
 				}
 				cl.tks <- Token{t: p[0]}
-				fmt.Println("Got token", len(cl.tks))
 			}
 		}()
 	}
@@ -143,4 +142,8 @@ func (cl *Client) FlushTokens() {
 			return
 		}
 	}
+}
+
+func (cl *Client) TksLen() int {
+	return len(cl.tks)
 }

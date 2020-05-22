@@ -38,7 +38,7 @@ func TestJobserver(t *testing.T) {
 			}
 		}()
 	}
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 	close(done)
 	fmt.Printf("Jobs %d Tokens %d\n", cl.jobs, len(tks))
 	expected := cl.jobs - 1
@@ -57,7 +57,7 @@ func TestJobserver(t *testing.T) {
 		cl.PutToken(tk)
 	}
 	m.Unlock()
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 	m.Lock() //
 	for len(tks) != 0 {
 		tk := tks[0]
@@ -66,5 +66,5 @@ func TestJobserver(t *testing.T) {
 	}
 	m.Unlock()
 	cl.FlushTokens()
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 }

@@ -18,7 +18,7 @@ import (
 var clientCount = flag.Uint("client", 1, "tokens to allocate in recursive client")
 var recurseFlag = flag.Bool("recurse", false, "call ourselves recursively")
 var serveCount = flag.Uint("serve", 1, "number of jobs to serve")
-var sleepTime = flag.Uint("sleep", 1, "seconds to sleep with tokens")
+var sleepTime = flag.Uint("sleep", 500, "milliseconds to sleep with tokens")
 var tokenCount = flag.Uint("tokens", 1, "number of tokens to allocate")
 
 func main() {
@@ -39,6 +39,7 @@ func main() {
 	}
 
 	var cmd *exec.Cmd
+	var srv *jobserver.Server
 	if *recurseFlag {
 		cmd = exec.Command("/proc/self/exe", "-tokens",
 			strconv.FormatUint(uint64(*clientCount), 10))
@@ -46,7 +47,7 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		_, err := jobserver.SetupServer(cmd, cl, 10)
+		srv, err = jobserver.SetupServer(cmd, cl, 10)
 		if err != nil {
 			panic(err)
 		}
@@ -56,13 +57,30 @@ func main() {
 		}
 	}
 
-	time.Sleep(time.Duration(*sleepTime) * time.Second)
+	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
-	for _, tk := range tks {
+	for len(tks) != 0 {
+		tk := tks[0]
+		tks = tks[1:]
 		cl.PutToken(tk)
 	}
 
-	time.Sleep(time.Duration(*sleepTime) * time.Second)
+	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
+
+	for len(tks) != 0 {
+		tk := tks[0]
+		tks = tks[1:]
+		cl.PutToken(tk)
+	}
+
+	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
+
+	if srv != nil {
+		srv.DisableJobs()
+	}
+	cl.FlushTokens()
+
+	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
 	if *recurseFlag {
 		err := cmd.Wait()
@@ -70,4 +88,7 @@ func main() {
 			panic(err)
 		}
 	}
+	fmt.Printf("Exiting with len(tks)=%d and len(cl.tks)=%d\n",
+		len(tks), cl.TksLen())
+
 }

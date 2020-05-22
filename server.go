@@ -69,22 +69,23 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 	srv = &Server{r: r2, w: w1, maxJobs: jobs, cl: cl}
 
 	go func() {
-		go srv.EnableJobs()
-		p := make([]byte, 1)
-		n, err := r1.Read(p)
-		if err != nil {
-			panic(err)
+		for {
+			go srv.EnableJobs()
+			p := make([]byte, 1)
+			n, err := r1.Read(p)
+			if err != nil {
+				panic(err)
+			}
+			if n != 1 {
+				panic("Unexpected byte count")
+			}
+			srv.m.Lock()
+			if srv.cl != nil {
+				srv.cl.PutToken(srv.tks[len(srv.tks)-1])
+				srv.tks = srv.tks[:len(srv.tks)-1]
+			}
+			srv.m.Unlock()
 		}
-		if n != 1 {
-			panic("Unexpected byte count")
-		}
-		srv.m.Lock()
-		srv.currentJobs--
-		if srv.cl != nil {
-			srv.cl.PutToken(srv.tks[len(srv.tks)-1])
-			srv.tks = srv.tks[:len(srv.tks)-1]
-		}
-		srv.m.Unlock()
 	}()
 
 	return
@@ -93,7 +94,7 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 func (srv *Server) EnableJobs() {
 	srv.m.Lock()
 	defer srv.m.Unlock()
-	for srv.currentJobs < srv.maxJobs {
+	for len(srv.tks) < srv.maxJobs {
 		if srv.cl != nil {
 			srv.tks = append(srv.tks, srv.cl.GetToken())
 		}
@@ -104,6 +105,17 @@ func (srv *Server) EnableJobs() {
 		if n != 1 {
 			panic("Unexpected byte count")
 		}
-		srv.currentJobs++
+	}
+}
+
+func (srv *Server) DisableJobs() {
+	srv.m.Lock()
+	defer srv.m.Unlock()
+	srv.maxJobs = 0
+	for len(srv.tks) > 0 {
+		if srv.cl != nil {
+			srv.cl.PutToken(srv.tks[len(srv.tks)-1])
+		}
+		srv.tks = srv.tks[:len(srv.tks)-1]
 	}
 }
