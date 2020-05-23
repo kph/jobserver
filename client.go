@@ -143,6 +143,7 @@ func (cl *Client) FlushTokens() {
 	}
 }
 
+// Tokens() returns the count of available tokens.
 func (cl *Client) Tokens() int {
 	return len(cl.freeTokens)
 }
