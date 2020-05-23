@@ -17,7 +17,7 @@ type Server struct {
 	w           *os.File
 	m           sync.Mutex
 	cl          *Client
-	tks         []Token
+	tokens      int
 	currentJobs int
 	maxJobs     int
 }
@@ -86,8 +86,8 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 			}
 			srv.m.Lock()
 			if srv.cl != nil {
-				srv.cl.PutToken(srv.tks[len(srv.tks)-1])
-				srv.tks = srv.tks[:len(srv.tks)-1]
+				srv.cl.PutToken()
+				srv.tokens--
 			}
 			srv.m.Unlock()
 		}
@@ -99,9 +99,10 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 func (srv *Server) EnableJobs() {
 	srv.m.Lock()
 	defer srv.m.Unlock()
-	for len(srv.tks) < srv.maxJobs {
+	for srv.tokens < srv.maxJobs {
 		if srv.cl != nil {
-			srv.tks = append(srv.tks, srv.cl.GetToken())
+			srv.cl.GetToken()
+			srv.tokens++
 		}
 		n, err := srv.w.Write([]byte{'+'})
 		if err != nil {
@@ -117,10 +118,10 @@ func (srv *Server) DisableJobs() {
 	srv.m.Lock()
 	defer srv.m.Unlock()
 	srv.maxJobs = 0
-	for len(srv.tks) > 0 {
+	for srv.tokens > 0 {
 		if srv.cl != nil {
-			srv.cl.PutToken(srv.tks[len(srv.tks)-1])
+			srv.cl.PutToken()
 		}
-		srv.tks = srv.tks[:len(srv.tks)-1]
+		srv.tokens--
 	}
 }

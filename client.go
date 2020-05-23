@@ -21,6 +21,7 @@ type Client struct {
 	m          sync.Mutex // Serialize access to fields below
 	jobs       int        // Count of jobs from MAKEFLAGS -j option
 	freeTokens chan Token // Tokens we've been given but aren't using
+	usedTokens []Token    // Tokens that are currently in use
 }
 
 type Token struct {
@@ -87,6 +88,7 @@ func NewClient() (cl *Client, err error) {
 	}
 	if cl.r != nil {
 		cl.freeTokens = make(chan Token, 100)
+		cl.usedTokens = make([]Token, 0)
 		go func() {
 			p := make([]byte, 1)
 			for {
@@ -105,19 +107,26 @@ func NewClient() (cl *Client, err error) {
 	return
 }
 
-func (cl *Client) GetToken() (t Token) {
+func (cl *Client) GetToken() {
 	//	if cl.r == nil {
 	//	cl.m.Lock()
 	//return Token{}
 	//}
-	t = <-cl.freeTokens
+	t := <-cl.freeTokens
+	cl.saveUsedToken(t)
 	return
 }
 
-func (cl *Client) PutToken(t Token) {
-	if cl.r == nil {
-		return
-	}
+func (cl *Client) saveUsedToken(t Token) {
+	cl.usedTokens = append(cl.usedTokens, t)
+}
+
+func (cl *Client) PutToken() {
+	//if cl.r == nil {
+	//	return
+	//}
+	t := cl.usedTokens[len(cl.usedTokens)-1]
+	cl.usedTokens = cl.usedTokens[:len(cl.usedTokens)-1]
 	cl.freeTokens <- t
 }
 

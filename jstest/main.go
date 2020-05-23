@@ -32,9 +32,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	tks := []jobserver.Token{}
+	tokens := 0
 	for i := uint(0); i < *tokenCount; i++ {
-		tks = append(tks, cl.GetToken())
+		cl.GetToken()
+		tokens++
 		fmt.Printf("Got token %d\n", i)
 	}
 
@@ -59,18 +60,16 @@ func main() {
 
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
-	for len(tks) != 0 {
-		tk := tks[0]
-		tks = tks[1:]
-		cl.PutToken(tk)
+	for tokens > 0 {
+		cl.PutToken()
+		tokens--
 	}
 
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
-	for len(tks) != 0 {
-		tk := tks[0]
-		tks = tks[1:]
-		cl.PutToken(tk)
+	for tokens > 0 {
+		cl.PutToken()
+		tokens--
 	}
 
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
@@ -88,7 +87,7 @@ func main() {
 			panic(err)
 		}
 	}
-	fmt.Printf("Exiting with len(tks)=%d and Tokens()=%d\n",
-		len(tks), cl.Tokens())
+	fmt.Printf("Exiting with tokens=%d and Tokens()=%d\n",
+		tokens, cl.Tokens())
 
 }
