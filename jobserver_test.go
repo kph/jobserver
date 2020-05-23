@@ -29,7 +29,7 @@ func TestJobserver(t *testing.T) {
 	for i := 0; i < 2*(cl.jobs+1); i++ {
 		go func() {
 			select {
-			case tk := <-cl.tks:
+			case tk := <-cl.freeTokens:
 				m.Lock()
 				tks = append(tks, tk)
 				m.Unlock()

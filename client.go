@@ -16,11 +16,11 @@ import (
 // A Client tracks the jobserver controlling us, i.e. our parent. It
 // is also used in the case where we are the parent.
 type Client struct {
-	r    *os.File
-	w    *os.File
-	m    sync.Mutex
-	jobs int
-	tks  chan Token
+	r          *os.File   // Pipe from parent giving us tokens
+	w          *os.File   // Pipe to parent returning tokens
+	m          sync.Mutex // Serialize access to fields below
+	jobs       int        // Count of jobs from MAKEFLAGS -j option
+	freeTokens chan Token // Tokens we've been given but aren't using
 }
 
 type Token struct {
@@ -39,6 +39,9 @@ func pipeFdToFile(fd int, name string) *os.File {
 	return nil
 }
 
+// NewClient determines whether we have a parent jobserver or not, and
+// returns a client structure. If MAKEFLAGS can not be parsed, we will
+// return an error.
 func NewClient() (cl *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 	cl = &Client{}
@@ -83,7 +86,7 @@ func NewClient() (cl *Client, err error) {
 		}
 	}
 	if cl.r != nil {
-		cl.tks = make(chan Token, 100)
+		cl.freeTokens = make(chan Token, 100)
 		go func() {
 			p := make([]byte, 1)
 			for {
@@ -95,7 +98,7 @@ func NewClient() (cl *Client, err error) {
 				if n != 1 {
 					panic("Unexpected byte count")
 				}
-				cl.tks <- Token{t: p[0]}
+				cl.freeTokens <- Token{t: p[0]}
 			}
 		}()
 	}
@@ -107,7 +110,7 @@ func (cl *Client) GetToken() (t Token) {
 	//	cl.m.Lock()
 	//return Token{}
 	//}
-	t = <-cl.tks
+	t = <-cl.freeTokens
 	return
 }
 
@@ -115,7 +118,7 @@ func (cl *Client) PutToken(t Token) {
 	if cl.r == nil {
 		return
 	}
-	cl.tks <- t
+	cl.freeTokens <- t
 }
 
 func (cl *Client) FlushTokens() {
@@ -126,7 +129,7 @@ func (cl *Client) FlushTokens() {
 
 	for {
 		select {
-		case tk := <-cl.tks:
+		case tk := <-cl.freeTokens:
 			n, err := cl.w.Write([]byte{tk.t})
 			if err != nil {
 				panic(err)
@@ -140,6 +143,6 @@ func (cl *Client) FlushTokens() {
 	}
 }
 
-func (cl *Client) TksLen() int {
-	return len(cl.tks)
+func (cl *Client) Tokens() int {
+	return len(cl.freeTokens)
 }

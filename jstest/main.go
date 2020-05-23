@@ -88,7 +88,7 @@ func main() {
 			panic(err)
 		}
 	}
-	fmt.Printf("Exiting with len(tks)=%d and len(cl.tks)=%d\n",
-		len(tks), cl.TksLen())
+	fmt.Printf("Exiting with len(tks)=%d and Tokens()=%d\n",
+		len(tks), cl.Tokens())
 
 }
