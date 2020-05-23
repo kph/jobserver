@@ -39,7 +39,7 @@ func pipeFdToFile(fd int, name string) *os.File {
 	return nil
 }
 
-func ParseMakeflags() (cl *Client, err error) {
+func NewClient() (cl *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 	cl = &Client{}
 	for _, mflag := range mflags {

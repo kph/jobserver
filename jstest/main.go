@@ -26,7 +26,7 @@ func main() {
 
 	flag.Parse()
 
-	cl, err := jobserver.ParseMakeflags()
+	cl, err := jobserver.NewClient()
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

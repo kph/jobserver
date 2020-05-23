@@ -17,7 +17,7 @@ func TestJobserver(t *testing.T) {
 		t.Error("not run under make - type make to test")
 		return
 	}
-	cl, err := ParseMakeflags()
+	cl, err := NewClient()
 	if err != nil {
 		t.Error("parseMakeflags:", err)
 		return
