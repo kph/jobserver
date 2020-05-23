@@ -13,6 +13,8 @@ import (
 	"syscall"
 )
 
+// A Client tracks the jobserver controlling us, i.e. our parent. It
+// is also used in the case where we are the parent.
 type Client struct {
 	r    *os.File
 	w    *os.File
@@ -25,6 +27,8 @@ type Token struct {
 	t byte
 }
 
+// pipeFDToFile is a wrapper for os.NewFile() which makes sure that
+// the file descriptor is actually a pipe, and then returns an os.File.
 func pipeFdToFile(fd int, name string) *os.File {
 	var stats syscall.Stat_t
 
@@ -103,19 +107,15 @@ func (cl *Client) GetToken() (t Token) {
 	//	cl.m.Lock()
 	//return Token{}
 	//}
-	fmt.Println("In GetToken", len(cl.tks))
 	t = <-cl.tks
-	fmt.Println("Done GetToken", len(cl.tks))
-	return t
+	return
 }
 
 func (cl *Client) PutToken(t Token) {
 	if cl.r == nil {
 		return
 	}
-	fmt.Println("PutToken")
 	cl.tks <- t
-	fmt.Println("Done pUtToken len", len(cl.tks))
 }
 
 func (cl *Client) FlushTokens() {

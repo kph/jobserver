@@ -22,6 +22,11 @@ type Server struct {
 	maxJobs     int
 }
 
+// SetupServer is used to set up a controlling jobserver for a new process.
+// We are passed an exec.Cmd which may already have been set up with
+// ExtraFiles. We assign two new files (pipes for the jobserver protocol)
+// to the two next free file descriptors, and modify the process
+// environment MAKEFLAGS variable to reference the allocated file descriptors.
 func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 	fd := 3 + len(cmd.ExtraFiles)
 	r1, w1, err := os.Pipe()
