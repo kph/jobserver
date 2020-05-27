@@ -36,7 +36,7 @@ func main() {
 	for i := uint(0); i < *tokenCount; i++ {
 		cl.GetToken()
 		tokens++
-		fmt.Printf("Got token %d\n", i)
+		fmt.Printf("%s: Got token %d\n", os.Args[0], i)
 	}
 
 	var cmd *exec.Cmd
@@ -58,6 +58,7 @@ func main() {
 		}
 	}
 
+	fmt.Printf("%s: P1\n", os.Args[0])
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
 	for tokens > 0 {
@@ -65,6 +66,7 @@ func main() {
 		tokens--
 	}
 
+	fmt.Printf("%s: P2\n", os.Args[0])
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
 	for tokens > 0 {
@@ -72,22 +74,27 @@ func main() {
 		tokens--
 	}
 
+	fmt.Printf("%s: P3\n", os.Args[0])
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
 	if srv != nil {
 		srv.DisableJobs()
 	}
+	fmt.Printf("%s: P4\n", os.Args[0])
 	cl.FlushTokens()
 
+	fmt.Printf("%s: P5\n", os.Args[0])
 	time.Sleep(time.Duration(*sleepTime) * time.Millisecond)
 
 	if *recurseFlag {
+		fmt.Printf("%s: P6\n", os.Args[0])
 		err := cmd.Wait()
 		if err != nil {
 			panic(err)
 		}
+		fmt.Printf("%s: P6\n", os.Args[0])
 	}
-	fmt.Printf("Exiting with tokens=%d and Tokens()=%d\n",
-		tokens, cl.Tokens())
+	fmt.Printf("%s: Exiting with tokens=%d and Tokens()=%d\n",
+		os.Args[0], tokens, cl.Tokens())
 
 }

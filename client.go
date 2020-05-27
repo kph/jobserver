@@ -20,11 +20,11 @@ type Client struct {
 	w          *os.File   // Pipe to parent returning tokens
 	m          sync.Mutex // Serialize access to fields below
 	jobs       int        // Count of jobs from MAKEFLAGS -j option
-	freeTokens chan Token // Tokens we've been given but aren't using
-	usedTokens []Token    // Tokens that are currently in use
+	freeTokens chan token // Tokens we've been given but aren't using
+	usedTokens []token    // Tokens that are currently in use
 }
 
-type Token struct {
+type token struct {
 	t byte
 }
 
@@ -87,8 +87,8 @@ func NewClient() (cl *Client, err error) {
 		}
 	}
 	if cl.r != nil {
-		cl.freeTokens = make(chan Token, 100)
-		cl.usedTokens = make([]Token, 0)
+		cl.freeTokens = make(chan token, 100)
+		cl.usedTokens = make([]token, 0)
 		go func() {
 			p := make([]byte, 1)
 			for {
@@ -100,7 +100,7 @@ func NewClient() (cl *Client, err error) {
 				if n != 1 {
 					panic("Unexpected byte count")
 				}
-				cl.freeTokens <- Token{t: p[0]}
+				cl.freeTokens <- token{t: p[0]}
 			}
 		}()
 	}
@@ -110,14 +110,18 @@ func NewClient() (cl *Client, err error) {
 func (cl *Client) GetToken() {
 	//	if cl.r == nil {
 	//	cl.m.Lock()
-	//return Token{}
+	//return token{}
 	//}
 	t := <-cl.freeTokens
 	cl.saveUsedToken(t)
+	fmt.Printf("%s: GetToken() free %d saved %d\n", os.Args[0],
+		len(cl.freeTokens), len(cl.usedTokens))
 	return
 }
 
-func (cl *Client) saveUsedToken(t Token) {
+func (cl *Client) saveUsedToken(t token) {
+	cl.m.Lock()
+	defer cl.m.Unlock()
 	cl.usedTokens = append(cl.usedTokens, t)
 }
 
@@ -125,8 +129,12 @@ func (cl *Client) PutToken() {
 	//if cl.r == nil {
 	//	return
 	//}
+	fmt.Printf("%s: PutToken() free %d saved %d\n", os.Args[0],
+		len(cl.freeTokens), len(cl.usedTokens))
+	cl.m.Lock()
 	t := cl.usedTokens[len(cl.usedTokens)-1]
 	cl.usedTokens = cl.usedTokens[:len(cl.usedTokens)-1]
+	cl.m.Unlock()
 	cl.freeTokens <- t
 }
 
@@ -135,10 +143,14 @@ func (cl *Client) FlushTokens() {
 		return
 	}
 	cl.r.Close()
-
+	fmt.Printf("%s: FlushTokens free %d saved %d\n", os.Args[0],
+		len(cl.freeTokens), len(cl.usedTokens))
 	for {
 		select {
 		case tk := <-cl.freeTokens:
+			fmt.Printf("%s: FlushTokens select loop free %d saved %d\n",
+				os.Args[0], len(cl.freeTokens),
+				len(cl.usedTokens))
 			n, err := cl.w.Write([]byte{tk.t})
 			if err != nil {
 				panic(err)

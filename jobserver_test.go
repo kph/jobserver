@@ -61,6 +61,7 @@ func TestJobserver(t *testing.T) {
 	m.Lock() //
 	for tokens > 0 {
 		cl.PutToken()
+		tokens--
 	}
 	m.Unlock()
 	cl.FlushTokens()

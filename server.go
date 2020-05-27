@@ -5,11 +5,13 @@
 package jobserver
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -77,14 +79,17 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 		for {
 			go srv.EnableJobs()
 			p := make([]byte, 1)
-			n, err := r1.Read(p)
+			n, err := srv.r.Read(p)
 			if err != nil {
 				panic(err)
 			}
 			if n != 1 {
 				panic("Unexpected byte count")
 			}
+			fmt.Printf("%s: Client returned a token\n",
+				os.Args[0])
 			srv.m.Lock()
+			srv.maxJobs = 0
 			if srv.cl != nil {
 				srv.cl.PutToken()
 				srv.tokens--
@@ -111,17 +116,26 @@ func (srv *Server) EnableJobs() {
 		if n != 1 {
 			panic("Unexpected byte count")
 		}
+		fmt.Printf("Sent client a token, savedTokens=%d\n",
+			len(srv.cl.usedTokens))
 	}
 }
 
 func (srv *Server) DisableJobs() {
 	srv.m.Lock()
-	defer srv.m.Unlock()
 	srv.maxJobs = 0
-	for srv.tokens > 0 {
-		if srv.cl != nil {
-			srv.cl.PutToken()
+	srv.m.Unlock()
+	for {
+		srv.m.Lock()
+		cnt := srv.tokens
+		srv.m.Unlock()
+		if cnt == 0 {
+			break
 		}
-		srv.tokens--
+		//		if srv.cl != nil {
+		//	srv.cl.PutToken()
+		//}
+		//srv.tokens--
+		time.Sleep(10 * time.Millisecond)
 	}
 }
