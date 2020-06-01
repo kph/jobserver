@@ -25,22 +25,28 @@ func TestJobserver(t *testing.T) {
 
 	tokens := 0
 	var m sync.Mutex
-	done := make(chan bool)
+	done := false
 	for i := 0; i < 2*(cl.jobs+1); i++ {
 		go func() {
-			select {
-			case tk := <-cl.freeTokens:
-				cl.saveUsedToken(tk)
+			for {
+				cl.GetToken()
 				m.Lock()
+				if done {
+					fmt.Printf("Tokens %d while done\n",
+						tokens)
+					cl.PutToken()
+					m.Unlock()
+					return
+				}
 				tokens++
 				m.Unlock()
-			case <-done:
-				return
 			}
 		}()
 	}
 	time.Sleep(100 * time.Millisecond)
-	close(done)
+	m.Lock()
+	done = true
+	m.Unlock()
 	fmt.Printf("Jobs %d Tokens %d\n", cl.jobs, tokens)
 	expected := cl.jobs - 1
 	if cl.jobs <= 2 {

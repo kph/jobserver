@@ -5,6 +5,7 @@
 package jobserver
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,12 +17,15 @@ import (
 // A Client tracks the jobserver controlling us, i.e. our parent. It
 // is also used in the case where we are the parent.
 type Client struct {
-	r          *os.File   // Pipe from parent giving us tokens
-	w          *os.File   // Pipe to parent returning tokens
-	m          sync.Mutex // Serialize access to fields below
-	jobs       int        // Count of jobs from MAKEFLAGS -j option
-	freeTokens chan token // Tokens we've been given but aren't using
-	usedTokens []token    // Tokens that are currently in use
+	r               *os.File   // Pipe from parent giving us tokens
+	w               *os.File   // Pipe to parent returning tokens
+	c               *sync.Cond // Condition variable for local tokens
+	jobs            int        // Count of jobs from MAKEFLAGS -j option
+	freeTokens      []token    // Tokens we've been given but aren't using
+	usedTokens      []token    // Tokens that are currently in use
+	maxLocalTokens  int        // Maximum tokens to allocate from our private pool
+	usedLocalTokens int        // Current number of local tokens allocated
+	flushing        bool       // We are flusing tokens
 }
 
 type token struct {
@@ -46,6 +50,7 @@ func pipeFdToFile(fd int, name string) *os.File {
 func NewClient() (cl *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 	cl = &Client{}
+	cl.c = sync.NewCond(&sync.Mutex{})
 	for _, mflag := range mflags {
 		fmt.Println(mflag)
 		if strings.HasPrefix(mflag, "--jobserver-auth=") {
@@ -87,84 +92,120 @@ func NewClient() (cl *Client, err error) {
 		}
 	}
 	if cl.r != nil {
-		cl.freeTokens = make(chan token, 100)
+		cl.freeTokens = make([]token, 0)
 		cl.usedTokens = make([]token, 0)
 		go func() {
 			p := make([]byte, 1)
 			for {
 				n, err := cl.r.Read(p)
 				if err != nil {
-					//panic(err)
-					return
+					if errors.Is(err, os.ErrClosed) {
+						return
+					}
+					panic(err)
 				}
 				if n != 1 {
 					panic("Unexpected byte count")
 				}
-				cl.freeTokens <- token{t: p[0]}
+				cl.c.L.Lock()
+				cl.freeTokens = append(cl.freeTokens,
+					token{t: p[0]})
+				cl.c.Signal()
+				cl.c.L.Unlock()
 			}
 		}()
 	}
 	return
 }
 
+// GetToken() is used to get an execution token. Before starting a CPU-bound
+// build operation, call GetToken() and the caller will block until a token
+// is available.
 func (cl *Client) GetToken() {
-	//	if cl.r == nil {
-	//	cl.m.Lock()
-	//return token{}
-	//}
-	t := <-cl.freeTokens
-	cl.saveUsedToken(t)
-	fmt.Printf("%s: GetToken() free %d saved %d\n", os.Args[0],
-		len(cl.freeTokens), len(cl.usedTokens))
-	return
+	cl.c.L.Lock()
+	for {
+		if cl.flushing {
+			panic("GetToken() while flusing tokens")
+		}
+		if cl.usedLocalTokens < cl.maxLocalTokens {
+			cl.usedLocalTokens++
+			fmt.Printf("%s: GetToken() usedLocalTokens %d maxLocalTokens %d\n",
+				os.Args[0], cl.usedLocalTokens,
+				cl.maxLocalTokens)
+			cl.c.L.Unlock()
+			return
+		}
+
+		if len(cl.freeTokens) > 0 {
+			t := cl.freeTokens[0]
+			cl.freeTokens = cl.freeTokens[1:]
+			cl.usedTokens = append(cl.usedTokens, t)
+			fmt.Printf("%s: GetToken() free %d saved %d\n",
+				os.Args[0],
+				len(cl.freeTokens), len(cl.usedTokens))
+			cl.c.L.Unlock()
+			return
+		}
+		cl.c.Wait()
+	}
 }
 
-func (cl *Client) saveUsedToken(t token) {
-	cl.m.Lock()
-	defer cl.m.Unlock()
-	cl.usedTokens = append(cl.usedTokens, t)
-}
-
+// PutToken() is used to return an execution token. When a CPU-bound build
+// operation is done, call PutToken() to make execution available to another
+// build operation.
 func (cl *Client) PutToken() {
-	//if cl.r == nil {
-	//	return
-	//}
-	fmt.Printf("%s: PutToken() free %d saved %d\n", os.Args[0],
+	cl.c.L.Lock()
+	defer cl.c.L.Unlock()
+	fmt.Printf("%s: PutToken() usedLocalTokens %d maxLocalTokens %d free %d saved %d\n",
+		os.Args[0], cl.usedLocalTokens, cl.maxLocalTokens,
 		len(cl.freeTokens), len(cl.usedTokens))
-	cl.m.Lock()
-	t := cl.usedTokens[len(cl.usedTokens)-1]
-	cl.usedTokens = cl.usedTokens[:len(cl.usedTokens)-1]
-	cl.m.Unlock()
-	cl.freeTokens <- t
+	if cl.flushing {
+		panic("GetToken() while flusing tokens")
+	}
+	if cl.usedLocalTokens > 0 {
+		cl.usedLocalTokens--
+	} else {
+		if len(cl.usedTokens) > 0 {
+			t := cl.usedTokens[0]
+			cl.usedTokens = cl.usedTokens[1:]
+			cl.freeTokens = append(cl.freeTokens, t)
+		} else {
+			panic("PutToken() without a token to free")
+		}
+	}
+	cl.c.Signal()
 }
 
 func (cl *Client) FlushTokens() {
-	if cl.r == nil {
-		return
+	cl.c.L.Lock()
+	defer cl.c.L.Unlock()
+	cl.flushing = true
+	if cl.r != nil {
+		cl.r.Close()
 	}
-	cl.r.Close()
 	fmt.Printf("%s: FlushTokens free %d saved %d\n", os.Args[0],
 		len(cl.freeTokens), len(cl.usedTokens))
-	for {
-		select {
-		case tk := <-cl.freeTokens:
-			fmt.Printf("%s: FlushTokens select loop free %d saved %d\n",
-				os.Args[0], len(cl.freeTokens),
-				len(cl.usedTokens))
-			n, err := cl.w.Write([]byte{tk.t})
-			if err != nil {
-				panic(err)
-			}
-			if n != 1 {
-				panic("Unexpected byte count")
-			}
-		default:
-			return
+	for len(cl.freeTokens) > 0 {
+		tk := cl.freeTokens[0]
+		cl.freeTokens = cl.freeTokens[1:]
+		fmt.Printf("%s: FlushTokens() free %d saved %d\n",
+			os.Args[0], len(cl.freeTokens),
+			len(cl.usedTokens))
+		n, err := cl.w.Write([]byte{tk.t})
+		if err != nil {
+			panic(err)
+		}
+		if n != 1 {
+			panic("Unexpected byte count")
 		}
 	}
 }
 
 // Tokens() returns the count of available tokens.
 func (cl *Client) Tokens() int {
-	return len(cl.freeTokens)
+	cnt := len(cl.freeTokens)
+	if cl.usedLocalTokens < cl.maxLocalTokens {
+		cnt += (cl.maxLocalTokens - cl.usedLocalTokens)
+	}
+	return cnt
 }
