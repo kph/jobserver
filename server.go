@@ -90,10 +90,8 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 				os.Args[0])
 			srv.m.Lock()
 			srv.maxJobs = 0
-			if srv.cl != nil {
-				srv.cl.PutToken()
-				srv.tokens--
-			}
+			srv.cl.PutToken()
+			srv.tokens--
 			srv.m.Unlock()
 		}
 	}()
@@ -105,10 +103,8 @@ func (srv *Server) EnableJobs() {
 	srv.m.Lock()
 	defer srv.m.Unlock()
 	for srv.tokens < srv.maxJobs {
-		if srv.cl != nil {
-			srv.cl.GetToken()
-			srv.tokens++
-		}
+		srv.cl.GetToken()
+		srv.tokens++
 		n, err := srv.w.Write([]byte{'+'})
 		if err != nil {
 			panic(err)

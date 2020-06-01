@@ -6,18 +6,18 @@ package jobserver
 
 import (
 	"fmt"
-	"os"
+	//	"os"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestJobserver(t *testing.T) {
-	if _, x := os.LookupEnv("MAKEFLAGS"); !x {
-		t.Error("not run under make - type make to test")
-		return
-	}
-	cl, err := NewClient()
+	//	if _, x := os.LookupEnv("MAKEFLAGS"); !x {
+	//		t.Error("not run under make - type make to test")
+	//		return
+	//}
+	cl, err := NewClient(0)
 	if err != nil {
 		t.Error("parseMakeflags:", err)
 		return
@@ -26,7 +26,7 @@ func TestJobserver(t *testing.T) {
 	tokens := 0
 	var m sync.Mutex
 	done := false
-	for i := 0; i < 2*(cl.jobs+1); i++ {
+	for i := 0; i < 2*(cl.ExpectedJobs()+1); i++ {
 		go func() {
 			for {
 				cl.GetToken()
@@ -47,13 +47,9 @@ func TestJobserver(t *testing.T) {
 	m.Lock()
 	done = true
 	m.Unlock()
-	fmt.Printf("Jobs %d Tokens %d\n", cl.jobs, tokens)
-	expected := cl.jobs - 1
-	if cl.jobs <= 2 {
-		expected = 1
-	}
-	if tokens != expected {
-		t.Error("Jobs", cl.jobs, "Expected", expected, "Tokens",
+	fmt.Printf("Jobs %d Tokens %d\n", cl.ExpectedJobs(), tokens)
+	if tokens != cl.ExpectedJobs() {
+		t.Error("Expected", cl.ExpectedJobs(), "Tokens",
 			tokens)
 		return
 	}

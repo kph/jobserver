@@ -16,6 +16,7 @@ import (
 )
 
 var clientCount = flag.Uint("client", 1, "tokens to allocate in recursive client")
+var localCount = flag.Uint("local", 0, "Number of local clients")
 var recurseFlag = flag.Bool("recurse", false, "call ourselves recursively")
 var serveCount = flag.Uint("serve", 1, "number of jobs to serve")
 var sleepTime = flag.Uint("sleep", 500, "milliseconds to sleep with tokens")
@@ -26,7 +27,7 @@ func main() {
 
 	flag.Parse()
 
-	cl, err := jobserver.NewClient()
+	cl, err := jobserver.NewClient(int(*localCount))
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

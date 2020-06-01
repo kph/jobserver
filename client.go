@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,15 +18,15 @@ import (
 // A Client tracks the jobserver controlling us, i.e. our parent. It
 // is also used in the case where we are the parent.
 type Client struct {
-	r               *os.File   // Pipe from parent giving us tokens
-	w               *os.File   // Pipe to parent returning tokens
-	c               *sync.Cond // Condition variable for local tokens
-	jobs            int        // Count of jobs from MAKEFLAGS -j option
-	freeTokens      []token    // Tokens we've been given but aren't using
-	usedTokens      []token    // Tokens that are currently in use
-	maxLocalTokens  int        // Maximum tokens to allocate from our private pool
-	usedLocalTokens int        // Current number of local tokens allocated
-	flushing        bool       // We are flusing tokens
+	r             *os.File   // Pipe from parent giving us tokens
+	w             *os.File   // Pipe to parent returning tokens
+	c             *sync.Cond // Condition variable for tokens
+	jobs          int        // Count of jobs from MAKEFLAGS -j option
+	freeTokens    []token    // Tokens we've been given but aren't using
+	usedTokens    []token    // Tokens that are currently in use
+	maxLocalJobs  int        // Maximum jobs to allocate from our private pool
+	usedLocalJobs int        // Current number of local jobs allocated
+	flushing      bool       // We are flusing tokens
 }
 
 type token struct {
@@ -46,8 +47,10 @@ func pipeFdToFile(fd int, name string) *os.File {
 
 // NewClient determines whether we have a parent jobserver or not, and
 // returns a client structure. If MAKEFLAGS can not be parsed, we will
-// return an error.
-func NewClient() (cl *Client, err error) {
+// return an error. If there is no MAKEFLAGS, then we are a top-level
+// build controller, and we will default to allowing as many concurrent
+// operations as there are CPUs, or a limit set by localClients.
+func NewClient(localClients int) (cl *Client, err error) {
 	mflags := strings.Fields(os.Getenv("MAKEFLAGS"))
 	cl = &Client{}
 	cl.c = sync.NewCond(&sync.Mutex{})
@@ -114,6 +117,12 @@ func NewClient() (cl *Client, err error) {
 				cl.c.L.Unlock()
 			}
 		}()
+	} else {
+		if localClients != 0 {
+			cl.maxLocalJobs = localClients
+		} else {
+			cl.maxLocalJobs = runtime.NumCPU()
+		}
 	}
 	return
 }
@@ -127,11 +136,11 @@ func (cl *Client) GetToken() {
 		if cl.flushing {
 			panic("GetToken() while flusing tokens")
 		}
-		if cl.usedLocalTokens < cl.maxLocalTokens {
-			cl.usedLocalTokens++
-			fmt.Printf("%s: GetToken() usedLocalTokens %d maxLocalTokens %d\n",
-				os.Args[0], cl.usedLocalTokens,
-				cl.maxLocalTokens)
+		if cl.usedLocalJobs < cl.maxLocalJobs {
+			cl.usedLocalJobs++
+			fmt.Printf("%s: GetToken() usedLocalJobs %d maxLocalJobs %d\n",
+				os.Args[0], cl.usedLocalJobs,
+				cl.maxLocalJobs)
 			cl.c.L.Unlock()
 			return
 		}
@@ -156,14 +165,14 @@ func (cl *Client) GetToken() {
 func (cl *Client) PutToken() {
 	cl.c.L.Lock()
 	defer cl.c.L.Unlock()
-	fmt.Printf("%s: PutToken() usedLocalTokens %d maxLocalTokens %d free %d saved %d\n",
-		os.Args[0], cl.usedLocalTokens, cl.maxLocalTokens,
+	fmt.Printf("%s: PutToken() usedLocalJobs %d maxLocalJobs %d free %d saved %d\n",
+		os.Args[0], cl.usedLocalJobs, cl.maxLocalJobs,
 		len(cl.freeTokens), len(cl.usedTokens))
 	if cl.flushing {
 		panic("GetToken() while flusing tokens")
 	}
-	if cl.usedLocalTokens > 0 {
-		cl.usedLocalTokens--
+	if cl.usedLocalJobs > 0 {
+		cl.usedLocalJobs--
 	} else {
 		if len(cl.usedTokens) > 0 {
 			t := cl.usedTokens[0]
@@ -204,8 +213,20 @@ func (cl *Client) FlushTokens() {
 // Tokens() returns the count of available tokens.
 func (cl *Client) Tokens() int {
 	cnt := len(cl.freeTokens)
-	if cl.usedLocalTokens < cl.maxLocalTokens {
-		cnt += (cl.maxLocalTokens - cl.usedLocalTokens)
+	if cl.usedLocalJobs < cl.maxLocalJobs {
+		cnt += (cl.maxLocalJobs - cl.usedLocalJobs)
 	}
 	return cnt
+}
+
+// ExpectedJobs() returns the max jobs we expect will be allowed at once.
+// This number is a guess. When make calls us with the -j option, and
+// we are the only job running, we will get one less token than the option
+// specified on -j.
+func (cl *Client) ExpectedJobs() int {
+	x := cl.jobs
+	if x >= 2 {
+		x--
+	}
+	return x + cl.maxLocalJobs
 }
