@@ -29,7 +29,7 @@ type Server struct {
 // ExtraFiles. We assign two new files (pipes for the jobserver protocol)
 // to the two next free file descriptors, and modify the process
 // environment MAKEFLAGS variable to reference the allocated file descriptors.
-func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
+func (cl *Client) SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) {
 	fd := 3 + len(cmd.ExtraFiles)
 	r1, w1, err := os.Pipe()
 	if err != nil {
@@ -46,28 +46,42 @@ func SetupServer(cmd *exec.Cmd, cl *Client, jobs int) (srv *Server, err error) {
 		env = os.Environ()
 	}
 	js := "--jobserver-auth=" + strconv.Itoa(fd) + "," + strconv.Itoa(fd+1)
-	found := false
+	jn := "-j" + strconv.Itoa(jobs)
+	mffound := false
 	for i, envvar := range env {
+		jsfound := false
+		jnfound := false
 		if strings.HasPrefix(envvar, "MAKEFLAGS=") {
+			mffound = true
 			mflags := strings.Fields(strings.TrimPrefix(envvar,
 				"MAKEFLAGS="))
 			for j, mflag := range mflags {
 				if strings.HasPrefix(mflag, "--jobserver-auth=") {
 					mflags[j] = js
-					found = true
-					break
+					jsfound = true
+					continue
+				}
+				if strings.HasPrefix(mflag, "-j") {
+					mflags[j] = jn
+					jnfound = true
+					continue
 				}
 			}
-			if !found {
+
+			if !jsfound {
 				mflags = append(mflags, js)
-				found = true
+				jsfound = true
+			}
+			if !jnfound {
+				mflags = append(mflags, jn)
+				jnfound = true
 			}
 			env[i] = "MAKEFLAGS=" + strings.Join(mflags, " ")
 			break
 		}
 	}
-	if !found {
-		env = append(env, "MAKEFLAGS="+js)
+	if !mffound {
+		env = append(env, "MAKEFLAGS="+js+" "+jn)
 	}
 	cmd.Env = env
 	cmd.ExtraFiles = append(cmd.ExtraFiles, r1)
@@ -133,5 +147,6 @@ func (srv *Server) DisableJobs() {
 		//}
 		//srv.tokens--
 		time.Sleep(10 * time.Millisecond)
+		fmt.Printf("DisableJobs: srv.tokens %d\n", srv.tokens)
 	}
 }
