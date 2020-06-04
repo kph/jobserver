@@ -155,6 +155,7 @@ func (cl *Client) GetToken() {
 			cl.c.L.Unlock()
 			return
 		}
+		fmt.Printf("%s: GetToken() waiting\n", os.Args[0])
 		cl.c.Wait()
 	}
 }
