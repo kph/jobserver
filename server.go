@@ -6,6 +6,7 @@ package jobserver
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -22,6 +23,7 @@ type Server struct {
 	tokens      int
 	currentJobs int
 	maxJobs     int
+	proxyToken  bool
 }
 
 // SetupServer is used to set up a controlling jobserver for a new process.
@@ -95,6 +97,17 @@ func (cl *Client) SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) 
 			p := make([]byte, 1)
 			n, err := srv.r.Read(p)
 			if err != nil {
+				if err == io.EOF {
+					if srv.tokens > 0 {
+						fmt.Printf("Child exited with %d tokens\n",
+							srv.tokens)
+						return
+					}
+					if srv.proxyToken {
+						fmt.Println("Child exited with proxy token")
+					}
+					return
+				}
 				panic(err)
 			}
 			if n != 1 {
@@ -104,8 +117,15 @@ func (cl *Client) SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) 
 				os.Args[0])
 			srv.m.Lock()
 			srv.maxJobs = 0
-			srv.cl.PutToken()
-			srv.tokens--
+			if srv.tokens > 0 {
+				srv.cl.PutToken()
+				srv.tokens--
+			} else {
+				if !srv.proxyToken {
+					panic("Client returned extra tokens")
+				}
+				srv.proxyToken = false
+			}
 			srv.m.Unlock()
 		}
 	}()
@@ -116,9 +136,13 @@ func (cl *Client) SetupServer(cmd *exec.Cmd, jobs int) (srv *Server, err error) 
 func (srv *Server) EnableJobs() {
 	srv.m.Lock()
 	defer srv.m.Unlock()
-	for srv.tokens < srv.maxJobs {
-		srv.cl.GetToken()
-		srv.tokens++
+	for srv.tokens < srv.maxJobs || !srv.proxyToken {
+		if srv.proxyToken {
+			srv.cl.GetToken()
+			srv.tokens++
+		} else {
+			srv.proxyToken = true
+		}
 		n, err := srv.w.Write([]byte{'+'})
 		if err != nil {
 			panic(err)
